@@ -1,5 +1,9 @@
 var after = require('after-all')
+var through = require('through2')
+var pump = require('pump')
+var lexint = require('lexicographic-integer')
 var mutexify = require('mutexify')
+var collect = require('stream-collector')
 var crypto = require('crypto')
 var cuid = require('cuid')
 var events = require('events')
@@ -8,6 +12,7 @@ var logs = require('./lib/logs')
 
 var NODE = 'node!'
 var ID = 'id!'
+var HEAD = 'head!'
 
 var Hyperlog = function(db, opts) {
   if (!(this instanceof Hyperlog)) return new Hyperlog(db, opts)
@@ -22,29 +27,52 @@ var Hyperlog = function(db, opts) {
 
   var self = this
   this.lock(function(release) {
-    var done = function(err) {
+    var onid = function(err) {
       if (err) return self.emit('error', err)
       self.emit('ready')
       release()
     }
 
     db.get(ID, {valueEncoding:'utf-8'}, function(err, id) {
-      if (err && !err.notFound) return done(err)
+      if (err && !err.notFound) return onid(err)
       self.id = id || opts.id || cuid()
-      if (self.id === id) return done()
-      db.put(ID, self.id, done)
+      if (self.id === id) return onid()
+      db.put(ID, self.id, onid)
     })
   })
 }
 
 util.inherits(Hyperlog, events.EventEmitter)
 
+Hyperlog.prototype.heads = function(opts, cb) {
+  if (typeof opts === 'function') return this.heads(null, opts)
+  if (!opts) opts = {}
+
+  var self = this
+  var values = opts.values !== false
+  var rs = this.db.createValueStream({
+    gt: HEAD,
+    lt: HEAD+'\xff',
+    valueEncoding: 'utf-8'
+  })
+
+  var format = function(ref, enc, cb) {
+    var i = ref.indexOf('!')
+    var log = ref.slice(0, i)
+    var seq = lexint.unpack(ref.slice(i+1), 'hex')
+    if (values) self.logs.get(log, seq, cb)
+    else cb(null, {log:log, seq:seq})
+  }
+
+  return collect(pump(rs, through.obj(format)), cb)
+}
+
 Hyperlog.prototype.get = function(hash, cb) {
   var self = this
   this.db.get(NODE+hash, {valueEncoding:'utf-8'}, function(err, ref) {
     if (err) return cb(err)
     var i = ref.indexOf('!')
-    self.logs.get(ref.slice(0, i), parseInt(ref.slice(i+1)), cb)
+    self.logs.get(ref.slice(0, i), lexint.unpack(ref.slice(i+1), 'hex'), cb)
   })  
 }
 
@@ -83,6 +111,7 @@ var add = function(self, log, links, value, cb) {
     node.hash = hash(value, links)
 
     var batch = []
+    var ref = node.log+'!'+lexint.pack(node.seq, 'hex')
 
     batch.push({
       type: 'put',
@@ -92,9 +121,17 @@ var add = function(self, log, links, value, cb) {
 
     batch.push({
       type: 'put',
-      key: NODE+node.hash,
-      value: node.log+'!'+node.seq
+      key: HEAD+ref,
+      value: ref
     })
+
+    batch.push({
+      type: 'put',
+      key: NODE+node.hash,
+      value: ref
+    })
+
+    for (var i = 0; i < links.length; i++) batch.push({type:'del', key:HEAD+links[i].log+'!'+lexint.pack(links[i].seq, 'hex')})
 
     self.get(node.hash, function(err, oldNode) {
       if (!err) return cb(err, oldNode)
