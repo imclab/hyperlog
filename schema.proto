@@ -5,10 +5,10 @@ message Link {
 }
 
 message Node {
-  required string hash  = 1;
-  required string log   = 2;
-  required uint32 seq   = 3;
-  required uint32 rank  = 4;
-  repeated Link   links = 5;
-  required bytes  value = 6;
+  required string hash   = 2;
+  required string log    = 3;
+  required uint32 seq    = 4;
+  required uint32 rank   = 5;
+  repeated Link   links  = 6;
+  required bytes  value  = 7;
 }
