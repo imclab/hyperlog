@@ -23,6 +23,7 @@ var Hyperlog = function(db, opts) {
   this.db = db
   this.id = opts.id
   this.logs = logs('logs', db)
+  this.tmp = logs('tmp', db)
   this.lock = mutexify()
 
   var self = this
