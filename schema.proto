@@ -12,3 +12,12 @@ message Node {
   repeated Link   links  = 6;
   required bytes  value  = 7;
 }
+
+message Head {
+  required string log = 1;
+  required uint32 seq = 2;
+}
+
+message Handshake {
+  required uint32 version = 1;
+}
