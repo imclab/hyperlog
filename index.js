@@ -20,8 +20,8 @@ var Hyperlog = function(db, opts) {
 
   events.EventEmitter.call(this)
 
-  this.db = db
   this.id = opts.id
+  this.db = db
   this.logs = logs('logs', db)
   this.tmp = logs('tmp', db)
   this.lock = mutexify()
@@ -52,6 +52,7 @@ Hyperlog.prototype.heads = function(opts, cb) {
   var self = this
   var values = opts.values !== false
   var rs = this.db.createValueStream({
+    reverse: opts.reverse,
     gt: HEAD,
     lt: HEAD+'\xff',
     valueEncoding: 'utf-8'
