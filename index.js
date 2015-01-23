@@ -95,7 +95,7 @@ var add = function(self, log, cksum, links, value, cb) {
     hash: null,
     log: log,
     seq: 0,
-    rank: 0,
+    sort: 0,
     links: links,
     value: value
   }
@@ -143,7 +143,7 @@ var add = function(self, log, cksum, links, value, cb) {
 
     self.get(typeof link === 'string' ? link : link.hash, function(err, resolved) {
       if (err) return n(err)
-      node.rank = Math.max(node.rank, resolved.rank+1)
+      node.sort = Math.max(node.sort, resolved.sort+1)
       links[i] = resolved
       n()
     })
@@ -155,13 +155,13 @@ var add = function(self, log, cksum, links, value, cb) {
     node.seq = 1+seq
 
     if (!seq) {
-      node.rank = Math.max(node.rank, 1)
+      node.sort = Math.max(node.sort, 1)
       return n()
     }
 
     self.logs.get(log, seq, function(err, prev) {
       if (err) return n(err)
-      node.rank = Math.max(node.rank, prev.rank+1)
+      node.sort = Math.max(node.sort, prev.sort+1)
       n()
     })
   })

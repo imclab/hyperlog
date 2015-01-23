@@ -8,7 +8,7 @@ message Node {
   required string hash   = 2;
   required string log    = 3;
   required uint32 seq    = 4;
-  required uint32 rank   = 5;
+  required uint32 sort   = 5;
   repeated Link   links  = 6;
   required bytes  value  = 7;
 }
