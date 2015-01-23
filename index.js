@@ -88,7 +88,7 @@ var hash = function(value, links) {
   return sha.digest('hex')
 }
 
-var add = function(self, log, links, value, cb) {
+var add = function(self, log, cksum, links, value, cb) {
   var self = self
 
   var node = {
@@ -104,6 +104,7 @@ var add = function(self, log, links, value, cb) {
     if (err) return cb(err)
 
     node.hash = hash(value, links)
+    if (cksum && node.hash !== cksum) return cb(new Error('checksum failed'))
 
     var batch = []
     var ref = node.log+'!'+lexint.pack(node.seq, 'hex')
@@ -172,11 +173,12 @@ Hyperlog.prototype.add = function(links, value, opts, cb) {
   if (!Array.isArray(links)) links = [links]
   if (!Buffer.isBuffer(value)) value = new Buffer(value)
   if (!cb) cb = noop
+  if (!opts) opts = {}
 
   var self = this
 
   this.lock(function(release) {
-    add(self, opts && opts.log || self.id, links, value, function(err, node) {
+    add(self, opts.log || self.id, opts.hash || null, links, value, function(err, node) {
       if (err) return release(cb, err)
       release(cb, null, node)
     })
