@@ -88,13 +88,6 @@ var hash = function(value, links) {
   return sha.digest('hex')
 }
 
-var ensure = function(self, node, cb) {
-  self.db.get(NODE+node.hash, {valueEncoding:'utf-8'}, function(err) {
-    if (err) return cb(err)
-    cb(null, node)
-  })
-}
-
 var add = function(self, log, links, value, cb) {
   var self = self
 
@@ -147,15 +140,12 @@ var add = function(self, log, links, value, cb) {
   links.forEach(function(link, i) {
     var n = next()
 
-    var onlink = function(err, resolved) {
+    self.get(typeof link === 'string' ? link : link.hash, function(err, resolved) {
       if (err) return n(err)
       node.rank = Math.max(node.rank, resolved.rank+1)
       links[i] = resolved
-      n()      
-    }
-
-    if (typeof link === 'string') self.get(link, onlink)
-    else ensure(self, link, onlink)
+      n()
+    })
   })
 
   var n = next()
