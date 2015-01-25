@@ -9,6 +9,7 @@ var cuid = require('cuid')
 var events = require('events')
 var util = require('util')
 var logs = require('./lib/logs')
+var replicator = require('./lib/replicator')
 
 var NODE = 'node!'
 var ID = 'id!'
@@ -67,6 +68,10 @@ Hyperlog.prototype.heads = function(opts, cb) {
   }
 
   return collect(pump(rs, through.obj(format)), cb)
+}
+
+Hyperlog.prototype.createReplicationStream = function(opts) {
+  return replicator(this, opts)
 }
 
 Hyperlog.prototype.get = function(hash, cb) {
