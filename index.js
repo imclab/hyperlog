@@ -8,11 +8,13 @@ var crypto = require('crypto')
 var cuid = require('cuid')
 var events = require('events')
 var util = require('util')
+var from = require('from2')
 var logs = require('./lib/logs')
 var replicator = require('./lib/replicator')
 
-var NODE = 'node!'
 var ID = 'id!'
+var CHANGES = 'changes!'
+var NODE = 'node!'
 var HEAD = 'head!'
 
 var Hyperlog = function(db, opts) {
@@ -23,16 +25,22 @@ var Hyperlog = function(db, opts) {
 
   this.id = opts.id
   this.db = db
+  this.change = 0
   this.logs = logs('logs', db)
   this.tmp = logs('tmp', db)
   this.lock = mutexify()
+  this.setMaxListeners(0)
 
   var self = this
   this.lock(function(release) {
     var onid = function(err) {
       if (err) return self.emit('error', err)
-      self.emit('ready')
-      release()
+      collect(db.createKeyStream({gt:CHANGES, lt:CHANGES+'\xff', limit:1, reverse:true}), function(err, keys) {
+        if (err) return self.emit('error', err)
+        self.change = keys.length ? lexint.unpack(keys[0].slice(CHANGES.length), 'hex') : 0
+        self.emit('ready')
+        release()
+      })
     }
 
     db.get(ID, {valueEncoding:'utf-8'}, function(err, id) {
@@ -45,6 +53,80 @@ var Hyperlog = function(db, opts) {
 }
 
 util.inherits(Hyperlog, events.EventEmitter)
+
+var getRef = function(self, ref, cb) {
+  var i = ref.indexOf('!')
+  self.logs.get(ref.slice(0, i), lexint.unpack(ref.slice(i+1), 'hex'), cb)
+}
+
+Hyperlog.prototype.createChangesStream = function(opts) {
+  if (!opts) opts = {}
+
+  var self = this
+  var since = opts.since || 0
+  var live = !!opts.live
+  var tail = !!opts.tail
+
+  var wait
+  var notify = function() {
+    if (!wait) return
+    var cb = wait
+    wait = null
+    read(0, cb)
+  }
+
+  var read = function(size, cb) {
+    if (tail) {
+      tail = false
+      self.lock(function(release) {
+        read(size, cb)
+        release()
+      })
+      return
+    }
+
+    self.db.get(CHANGES+lexint.pack(since+1, 'hex'), function(err, ref) {
+      if (err && !err.notFound) return cb(err)
+
+      if (err) {
+        if (self.change > since) return read(size, cb)
+        wait = cb
+        return
+      }
+
+      since++
+      cb(null, ref)
+    })
+  }
+
+  var rs
+
+  if (live) {
+    rs = from.obj(read)
+    if (tail) {
+      self.lock(function(release) {
+        since = self.change
+        release()
+      })
+    }
+    self.on('add', notify)
+    rs.on('close', function() {
+      self.removeListener('add', notify)
+    })
+  } else {
+    rs = db.createValueStream({
+      gt:CHANGES+lexint.pack(since, 'hex'),
+      lt:CHANGES+'\xff',
+      reverse: opts.reverse
+    })
+  }
+
+  var format = through.obj(function(ref, enc, cb) {
+    getRef(self, ref, cb)
+  })
+
+  return pump(rs, format)
+}
 
 Hyperlog.prototype.heads = function(opts, cb) {
   if (typeof opts === 'function') return this.heads(null, opts)
@@ -78,9 +160,8 @@ Hyperlog.prototype.get = function(hash, cb) {
   var self = this
   this.db.get(NODE+hash, {valueEncoding:'utf-8'}, function(err, ref) {
     if (err) return cb(err)
-    var i = ref.indexOf('!')
-    self.logs.get(ref.slice(0, i), lexint.unpack(ref.slice(i+1), 'hex'), cb)
-  })  
+    getRef(self, ref, cb)
+  })
 }
 
 var hash = function(value, links) {
@@ -97,6 +178,7 @@ var add = function(self, log, cksum, links, value, cb) {
   var self = self
 
   var node = {
+    change: 0,
     hash: null,
     log: log,
     seq: 0,
@@ -111,6 +193,8 @@ var add = function(self, log, cksum, links, value, cb) {
     node.hash = hash(value, links)
     if (cksum && node.hash !== cksum) return cb(new Error('checksum failed'))
 
+    node.change = self.change+1
+
     var batch = []
     var ref = node.log+'!'+lexint.pack(node.seq, 'hex')
 
@@ -118,6 +202,12 @@ var add = function(self, log, cksum, links, value, cb) {
       type: 'put',
       key: self.logs.key(log, node.seq),
       value: self.logs.value(node)
+    })
+
+    batch.push({
+      type: 'put',
+      key: CHANGES+lexint.pack(node.change, 'hex'),
+      value: ref
     })
 
     batch.push({
@@ -138,6 +228,9 @@ var add = function(self, log, cksum, links, value, cb) {
       if (!err) return cb(err, oldNode)
       self.db.batch(batch, function(err) {
         if (err) return cb(err)
+
+        self.change++
+        self.emit('add', node)
         cb(null, node)
       })
     })

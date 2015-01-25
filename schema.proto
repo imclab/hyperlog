@@ -5,6 +5,7 @@ message Link {
 }
 
 message Node {
+  required uint32 change = 1;
   required string hash   = 2;
   required string log    = 3;
   required uint32 seq    = 4;
