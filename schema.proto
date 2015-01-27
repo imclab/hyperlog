@@ -21,4 +21,5 @@ message Head {
 
 message Handshake {
   required uint32 version = 1;
+  required string mode = 2;
 }
